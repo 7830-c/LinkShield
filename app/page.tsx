@@ -72,65 +72,100 @@ export default function Home() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        console.error("API Error Response:", data);
         throw new Error(data.error || data.details || `Request failed: ${res.status}`);
       }
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      if (!reader) {
+        console.error("No response body available in the response");
+        throw new Error("No response body");
+      }
 
       const decoder = new TextDecoder();
       let buffer = "";
+
+      const processLine = (line: string) => {
+        console.log("Raw line from stream:", line);
+        if (!line.startsWith("data: ")) return;
+        const payload = line.slice(6).trim();
+        console.log("Payload content:", payload);
+        if (payload === "[DONE]" || payload === "") {
+          console.log("Payload is DONE or empty");
+          return;
+        }
+        try {
+          const event = JSON.parse(payload);
+          console.log("Parsed SSE event:", event);
+          
+          // TinyFish API uses snake_case keys
+          const currentRunId = event.run_id || event.runId;
+
+          if (event.type === "STARTED") {
+            if (currentRunId) {
+              runIdRef.current = currentRunId;
+              setRunId(currentRunId);
+            }
+            addProgress("Browser session active.", "started");
+          } else if (event.type === "STREAMING_URL" && (event.streaming_url || event.streamingUrl)) {
+            const sUrl = event.streaming_url || event.streamingUrl;
+            console.log("Setting streaming URL:", sUrl);
+            setStreamingUrl(sUrl);
+            addProgress("Live view connected.", "url");
+          } else if (event.type === "PROGRESS") {
+            const purpose = event.purpose || event.message || "Working…";
+            addProgress(purpose, "progress");
+          } else if (event.type === "COMPLETE") {
+            console.log("COMPLETE event received:", event);
+            if (event.status === "COMPLETED") {
+              let result = event.result || event.resultJson;
+              if (typeof result === "string") {
+                try {
+                  result = JSON.parse(result);
+                } catch {
+                  result = { raw: result };
+                }
+              }
+              console.log("Setting final report:", result);
+              setReport(result as FraudReport);
+              addProgress("Report generated.", "complete");
+              setStatus("done");
+            } else {
+              const errMsg = event.error?.message || event.status || "Unknown error";
+              console.error("Audit COMPLETED with error:", errMsg);
+              throw new Error(errMsg);
+            }
+          }
+        } catch (parseErr) {
+          if (parseErr instanceof SyntaxError) {
+            console.warn("Syntax error parsing payload:", payload);
+            return;
+          }
+          throw parseErr;
+        }
+      };
 
       addProgress("Connected. Initializing agent…", "started");
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log("Stream reader DONE.");
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6).trim();
-          if (payload === "[DONE]" || payload === "") continue;
-          try {
-            const event = JSON.parse(payload);
-            if (event.type === "STARTED") {
-              if (event.runId) {
-                runIdRef.current = event.runId;
-                setRunId(event.runId);
-              }
-              addProgress("Browser session active.", "started");
-            } else if (event.type === "STREAMING_URL" && event.streamingUrl) {
-              setStreamingUrl(event.streamingUrl);
-              addProgress("Live view connected.", "url");
-            } else if (event.type === "PROGRESS") {
-              const purpose = event.purpose || event.message || "Working…";
-              addProgress(purpose, "progress");
-            } else if (event.type === "COMPLETE") {
-              if (event.status === "COMPLETED") {
-                let result = event.resultJson;
-                if (typeof result === "string") {
-                  try {
-                    result = JSON.parse(result);
-                  } catch {
-                    result = { raw: result };
-                  }
-                }
-                setReport(result as FraudReport);
-                addProgress("Report generated.", "complete");
-                setStatus("done");
-              } else {
-                const errMsg = event.error?.message || event.status || "Unknown error";
-                throw new Error(errMsg);
-              }
-            }
-          } catch (parseErr) {
-            if (parseErr instanceof SyntaxError) continue;
-            throw parseErr;
-          }
+          processLine(line);
         }
+      }
+
+      // Process any remaining data in buffer
+      if (buffer.trim()) {
+        console.log("Processing final buffer:", buffer);
+        processLine(buffer);
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {

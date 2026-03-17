@@ -140,17 +140,36 @@ export async function POST(request: NextRequest) {
     }
 
     const contentType = res.headers.get("content-type") || "text/event-stream";
-    return new Response(res.body, {
+    console.log("TinyFish response status:", res.status, "ContentType:", contentType);
+
+    // Create a transform stream to log chunks as they pass through
+    const tracker = new TransformStream({
+      transform(chunk, controller) {
+        try {
+          const text = new TextDecoder().decode(chunk);
+          console.log(">>> [SERVER] Outbound Stream Chunk:", text);
+        } catch (err) {
+          console.log(">>> [SERVER] Error decoding chunk:", err);
+        }
+        controller.enqueue(chunk);
+      }
+    });
+
+    const stream = (res.body as any).pipeThrough(tracker);
+
+    return new Response(stream, {
       status: 200,
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   } catch (e) {
     clearTimeout(timeout);
     const message = e instanceof Error ? e.message : "Unknown error";
+    console.error(">>> [SERVER] Error in /api/analyze:", e);
     return NextResponse.json(
       { error: "Analysis request failed", details: message },
       { status: 502 }
