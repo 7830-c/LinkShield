@@ -9,35 +9,43 @@ URL: ${inputUrl}
 
 Workflow:
 
-1. Open the given URL.
-   - Extract visible metadata: page title, description, domain name, SSL certificate status, HTTPS presence, favicon/logo, and any visible links.
+1. Identify link type:
+   - If URL contains "t.me/" → treat as Telegram channel link.
+   - Else → treat as website/domain link.
 
-2. Content analysis:
-   - If page content is visible, analyze text for red flags (urgency, fake giveaways, requests for money/keys, impersonation of banks or brands, unrealistic offers).
-   - If no content is visible (e.g., login wall, redirect), base findings only on metadata and links.
+2. Open the given URL.
+   - If website: extract visible metadata (page title, description, domain name, SSL certificate status, HTTPS presence, favicon/logo, and any visible links).
+   - If Telegram: extract channel metadata (name, description, member count, creation date if visible).
+   - If Telegram channel preview button is not working → stop clicking further, only use available metadata and web reputation search.
 
-3. Outbound links:
+3. Content analysis:
+   - If page/channel content is visible, analyze text/posts for red flags (urgency, fake giveaways, requests for money/keys, impersonation of banks or brands, unrealistic offers).
+   - If no content is visible (e.g., login wall, redirect, or Telegram preview disabled), base findings only on metadata and links.
+
+4. Outbound links:
    - Collect all clickable links.
    - For each external link, check if it leads to a trusted site with proper HTTPS and valid SSL.
    - Label each as "safe" | "suspicious" | "phishing" with reason.
 
-4. Web reputation search:
-   - Always search the web for news, articles, or reports about the domain or brand.
+5. Web reputation search:
+   - Always search the web for news, articles, or reports about the domain or channel.
    - If scam alerts, fraud warnings, or negative coverage are found, mark unsafe.
    - If coverage is positive or neutral, include that in evidence.
 
-5. Admin/ownership:
-   - If WHOIS or ownership info is visible, record it.
+6. Admin/ownership:
+   - If WHOIS or ownership info is visible (websites), record it.
+   - If Telegram admin info visible, record it.
    - If not, set admin_visible: false.
 
-6. Payment/security signals:
+7. Payment/security signals:
    - If the site offers shopping or payments, check for secure payment gateways, HTTPS checkout, and trusted providers.
+   - If Telegram channel promotes unsafe payment flows (direct wallet addresses, suspicious QR codes), flag insecure.
    - Flag if payment flow looks fake or insecure.
 
-7. Evidence:
-   - Compile a list of findings that support the risk score (e.g., "Domain has valid SSL", "Outbound links safe", "Scam reports found online").
+8. Evidence:
+   - Compile a list of findings that support the risk score (e.g., "Domain has valid SSL", "Outbound links safe", "Scam reports found online", "Telegram posts contain crypto giveaway scams").
 
-8. Fraud Risk Score:
+9. Fraud Risk Score:
    - Start at 50 baseline.
    - Add points for positive signals:
      • +20 valid SSL certificate
@@ -52,7 +60,9 @@ Workflow:
      • −20 hidden/impersonated ownership
      • −20 insecure payment flow
      • −25 scam reports online
+     • −15 very new domain (<3 months)
      • −10 incomplete metadata
+     • −20 repeated scam patterns in Telegram/social posts
    - Interpret score:
      • 70–100 = legitimate
      • 40–69 = suspicious
@@ -61,10 +71,10 @@ Workflow:
 Return ONLY a single JSON object (no markdown, no code block):
 
 {
-  "site_metadata": { "title": "", "description": null, "domain": "", "https": false, "ssl_valid": false, "favicon_present": false },
+  "site_metadata": { "title": "", "description": null, "domain": "", "https": false, "ssl_valid": false, "favicon_present": false, "domain_age": null, "registrar": null },
   "content_analysis": { "red_flags": [], "summary": "" },
   "outbound_links": [],
-  "ownership_info": { "admin_visible": false, "admin_name": null, "cross_platform_match": null },
+  "ownership_info": { "admin_visible": false, "admin_name": null, "registrar": null, "domain_age": null },
   "payment_security": { "secure_gateway": false, "https_checkout": false },
   "evidence": [],
   "fraud_risk_score": 0,
